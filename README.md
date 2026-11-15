@@ -1,5 +1,5 @@
 [README.md](https://github.com/user-attachments/files/34877031/README.md)
-# minecraft2.0# 
+# minecraft2.0
 
 复刻《Minecraft》核心玩法的最小可行版本。**100% 免费，无任何付费、内购或广告**；
 所用技术栈（Vite + Three.js）均为开源免费（MIT 许可），纹理与怪物模型全部由代码实时生成，不含任何图片素材。
