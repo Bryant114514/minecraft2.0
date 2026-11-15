@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Minecraft 2.0 —— 沙盒 MVP</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+                 font-family: "Microsoft YaHei", "PingFang SC", sans-serif; }
+    #app { position: fixed; inset: 0; }
+    canvas { display: block; }
+
+    /* 屏幕中心准星 */
+    #crosshair {
+      position: fixed; left: 50%; top: 50%;
+      width: 20px; height: 20px;
+      transform: translate(-50%, -50%);
+      pointer-events: none; z-index: 10;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ""; position: absolute; background: rgba(255,255,255,0.9);
+      box-shadow: 0 0 2px rgba(0,0,0,0.8);
+    }
+    #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
+    #crosshair::after  { top: 50%; left: 0; height: 2px; width: 100%; transform: translateY(-50%); }
+
+    /* 顶部操作提示 */
+    #hint {
+      position: fixed; left: 50%; top: 24px; transform: translateX(-50%);
+      color: #fff; background: rgba(0,0,0,0.55); padding: 8px 16px;
+      border-radius: 6px; font-size: 13px; z-index: 10; white-space: nowrap;
+    }
+
+    /* 底部物品栏 */
+    #hotbar {
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+      display: flex; gap: 6px; z-index: 10;
+    }
+    .slot {
+      position: relative; width: 56px; height: 58px; border: 2px solid rgba(255,255,255,0.55);
+      border-radius: 6px; background: rgba(0,0,0,0.4);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: #fff; cursor: pointer;
+    }
+    .slot.active { border-color: #fff; background: rgba(255,255,255,0.25); box-shadow: 0 0 8px rgba(255,255,255,0.6); }
+    .slot .swatch { width: 26px; height: 26px; border-radius: 4px; margin-bottom: 2px; }
+    .slot .name  { font-size: 10px; line-height: 1.1; }
+    .slot .count { position: absolute; bottom: 2px; right: 4px; font-size: 12px; text-shadow: 0 0 2px #000; }
+    .slot .key   { position: absolute; top: 2px; left: 5px; font-size: 11px; opacity: 0.7; }
+
+    /* 血条（生存模式） */
+    #healthbar {
+      position: fixed; left: 16px; top: 16px; width: 200px; height: 18px;
+      background: rgba(0,0,0,0.5); border: 2px solid rgba(255,255,255,0.6);
+      border-radius: 4px; z-index: 10; display: none;
+    }
+    #healthbar-fill { height: 100%; width: 100%; background: #e23b3b; transition: width 0.15s; }
+    #healthbar-text {
+      position: absolute; left: 0; right: 0; top: 0; line-height: 18px;
+      text-align: center; color: #fff; font-size: 12px; text-shadow: 0 0 2px #000;
+    }
+
+    /* 模式标签 */
+    #mode-label {
+      position: fixed; right: 16px; top: 16px; color: #fff;
+      background: rgba(0,0,0,0.5); padding: 6px 12px; border-radius: 6px;
+      font-size: 14px; z-index: 10;
+    }
+
+    /* 受伤红色闪屏 */
+    #hurt-flash {
+      position: fixed; inset: 0; background: #c00; opacity: 0;
+      pointer-events: none; z-index: 15;
+    }
+
+    /* 拉弓蓄力条 */
+    #charge {
+      position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+      width: 180px; height: 6px; background: rgba(0,0,0,0.5); border-radius: 3px;
+      z-index: 10; display: none;
+    }
+    #charge-fill { height: 100%; width: 0%; background: #5fd35f; border-radius: 3px; }
+
+    /* 拾取/提示 */
+    #toast {
+      position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%);
+      color: #fff; background: rgba(0,0,0,0.6); padding: 6px 14px; border-radius: 6px;
+      font-size: 14px; z-index: 10; opacity: 0; pointer-events: none;
+    }
+
+    /* 背包 */
+    #backpack {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 18; color: #fff;
+    }
+    #backpack h2 { margin-bottom: 16px; }
+    #backpack-grid { display: flex; flex-wrap: wrap; gap: 10px; max-width: 560px; justify-content: center; }
+    .backpack-slot {
+      position: relative; width: 76px; height: 76px; background: rgba(0,0,0,0.5);
+      border: 2px solid rgba(255,255,255,0.5); border-radius: 6px; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .backpack-slot:hover { border-color: #fff; background: rgba(255,255,255,0.18); }
+    .backpack-slot .swatch { width: 32px; height: 32px; border-radius: 4px; }
+    .backpack-slot .name { font-size: 11px; margin-top: 2px; }
+    .backpack-slot .count { position: absolute; bottom: 3px; right: 5px; font-size: 12px; }
+
+    /* 物品贴图统一缩放 */
+    .slot .swatch, .backpack-slot .swatch {
+      background-size: cover; background-position: center; image-rendering: pixelated;
+    }
+
+    /* 开始遮罩 */
+    #overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.68);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: #fff; z-index: 20; text-align: center;
+    }
+    #overlay h1 { font-size: 36px; margin-bottom: 10px; letter-spacing: 2px; }
+    /* 菜单页与按钮 */
+    .screen { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+    .subtitle { font-size: 14px; opacity: 0.8; margin: 4px 0 22px; }
+    .hint { font-size: 12px; opacity: 0.6; margin-top: 18px; }
+    .menu-btn {
+      padding: 12px 28px; font-size: 17px; border: 2px solid #fff; border-radius: 8px;
+      background: rgba(255,255,255,0.12); color: #fff; cursor: pointer;
+      transition: background 0.15s; margin: 6px 0;
+    }
+    .menu-btn:hover { background: rgba(255,255,255,0.3); }
+    .menu-btn.ghost { background: rgba(0,0,0,0.25); border-color: rgba(255,255,255,0.6); }
+    .btn-row { display: flex; gap: 16px; margin: 14px 0; flex-wrap: wrap; justify-content: center; }
+    .btn-row button {
+      padding: 11px 20px; font-size: 15px; border: 2px solid #fff; border-radius: 8px;
+      background: rgba(255,255,255,0.12); color: #fff; cursor: pointer; transition: background 0.15s;
+    }
+    .btn-row button:hover { background: rgba(255,255,255,0.3); }
+    #save-slots { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin: 18px 0; }
+    .save-slot {
+      width: 210px; padding: 16px; border: 2px solid rgba(255,255,255,0.45); border-radius: 10px;
+      background: rgba(0,0,0,0.35); display: flex; flex-direction: column; gap: 8px; align-items: center;
+    }
+    .save-slot.empty { border-style: dashed; opacity: 0.8; }
+    .save-title { font-size: 18px; font-weight: bold; }
+    .save-info { font-size: 13px; opacity: 0.85; }
+    .save-actions { display: flex; gap: 8px; justify-content: center; }
+    .save-actions button {
+      padding: 6px 16px; font-size: 14px; border: 1px solid #fff; border-radius: 6px;
+      background: rgba(255,255,255,0.15); color: #fff; cursor: pointer; transition: background 0.15s;
+    }
+    .save-actions button:hover { background: rgba(255,255,255,0.3); }
+    .save-actions button.del { border-color: #e88; background: rgba(200,45,45,0.35); }
+    .save-actions button.del:hover { background: rgba(220,60,60,0.55); }
+  </style>
+  <script type="module" crossorigin src="./assets/index-BKRqJCoH.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="crosshair"></div>
+  <div id="hint">左键：剑攻击/破坏 | 右键：弓蓄力/放方块 | WASD 移动(双击W疾跑) | 空格跳 | Shift 潜行(静步·飞行下降) | 1-9/滚轮 切换 | E 背包 | F 飞行</div>
+  <div id="hotbar"></div>
+  <div id="healthbar"><div id="healthbar-fill"></div><span id="healthbar-text"></span></div>
+  <div id="mode-label"></div>
+  <div id="hurt-flash"></div>
+  <div id="charge"><div id="charge-fill"></div></div>
+  <div id="toast"></div>
+  <div id="backpack">
+    <h2>背包</h2>
+    <div id="backpack-grid"></div>
+    <p style="margin-top:16px;font-size:13px;opacity:0.8;">点击物品放入当前选中的快捷栏格子（数字键/滚轮选择） · 按 E 关闭</p>
+  </div>
+  <div id="overlay">
+    <!-- 主界面 -->
+    <div id="screen-main" class="screen">
+      <h1>Minecraft 2.0</h1>
+      <p class="subtitle">沙盒 MVP · 100% 免费 · 无广告</p>
+      <button id="btn-saves" class="menu-btn">开始游戏 / 选择存档</button>
+      <p class="hint">WASD 移动 · 鼠标视角 · 左键攻击/破坏 · E 背包</p>
+    </div>
+
+    <!-- 存档选择 -->
+    <div id="screen-saves" class="screen" style="display:none;">
+      <h1>选择存档</h1>
+      <div id="save-slots"></div>
+      <button id="btn-saves-back" class="menu-btn ghost">返回</button>
+    </div>
+
+    <!-- 新建存档：模式 + 地图 -->
+    <div id="screen-newgame" class="screen" style="display:none;">
+      <h1>新建存档</h1>
+      <p class="subtitle" id="newgame-prompt">选择游戏模式</p>
+      <div id="mode-select" class="btn-row">
+        <button data-mode="survival">生存模式（有怪物，会受伤）</button>
+        <button data-mode="creative">创造模式（无敌，可飞行）</button>
+      </div>
+      <div id="map-select" class="btn-row" style="display:none;">
+        <button data-map="default">草原丘陵</button>
+        <button data-map="ancient_city">远古城市</button>
+      </div>
+      <button id="btn-new-back" class="menu-btn ghost">返回</button>
+    </div>
+
+    <!-- 暂停菜单 -->
+    <div id="screen-pause" class="screen" style="display:none;">
+      <h1>游戏暂停</h1>
+      <button id="btn-resume" class="menu-btn">继续游戏</button>
+      <button id="btn-exit" class="menu-btn">存档并返回主界面</button>
+    </div>
+  </div>
+  <div id="fatal" style="position:fixed;left:50%;bottom:40px;transform:translateX(-50%);max-width:90vw;color:#fff;background:rgba(180,30,30,0.92);padding:12px 18px;border-radius:8px;font-size:14px;z-index:30;display:none;text-align:center;"></div>
+</body>
+</html>
